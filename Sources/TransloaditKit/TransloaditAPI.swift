@@ -59,6 +59,46 @@ final class TransloaditAPI: NSObject {
     
     func createAssembly(
       templateId: String,
+      steps: [Step],
+      expectedNumberOfFiles: Int,
+      customFields: [String: String],
+      completion: @escaping (Result<Assembly, TransloaditAPIError>) -> Void
+    ) {
+      guard let request = try? makeAssemblyRequest(
+        templateId: templateId,
+        steps: steps,
+        expectedNumberOfFiles: expectedNumberOfFiles,
+        customFields: customFields)
+      else {
+        // Next runloop to make the API consistent with the network runloop. Otherwise it would return instantly, can give weird effects
+        DispatchQueue.main.async {
+            completion(.failure(TransloaditAPIError.cantSerialize))
+        }
+        return
+      }
+      
+      let task = session.dataTask(with: request) { (data, response, error) in
+          if let data = data {
+              do {
+                  let decoder = JSONDecoder()
+                  decoder.keyDecodingStrategy = .convertFromSnakeCase
+                  let assembly = try decoder.decode(Assembly.self, from: data)
+                  
+                  if let error = assembly.error {
+                      completion(.failure(.assemblyError(error)))
+                  } else {
+                      completion(.success(assembly))
+                  }
+              } catch {
+                  completion(.failure(TransloaditAPIError.couldNotCreateAssembly(error)))
+              }
+          }
+      }
+      task.resume()
+    }
+    
+    func createAssembly(
+      templateId: String,
       expectedNumberOfFiles: Int,
       customFields: [String: String],
       completion: @escaping (Result<Assembly, TransloaditAPIError>) -> Void
@@ -139,6 +179,78 @@ final class TransloaditAPI: NSObject {
             }
         }), for: task)
         task.resume()
+    }
+    
+    private func makeAssemblyRequest(
+      templateId: String,
+      steps: [Step],
+      expectedNumberOfFiles: Int,
+      customFields: [String: String]
+    ) throws -> URLRequest {
+      func makeBody(includeSecret: Bool) throws -> [String: String] {
+          // Time to allow uploads after signing.
+          let secondsInDay: Double = 86400
+          let dateTime: String = type(of: self).formatter.string(from: Date().addingTimeInterval(secondsInDay))
+         
+          let authObject = ["key": credentials.key, "expires": dateTime]
+          
+          var params: [String: Any] = ["auth": authObject, "template_id": templateId]
+          params["steps"] = steps.toDictionary
+          params["fields"] = customFields
+          
+          let paramsData: Data
+          if #available(macOS 10.15, iOS 13.0, *) {
+              paramsData = try JSONSerialization.data(withJSONObject: params, options: .withoutEscapingSlashes)
+          } else {
+              paramsData = try! JSONSerialization.data(withJSONObject: params, options: [])
+          }
+          
+          guard let paramsJSONString = String(data: paramsData, encoding: .utf8) else {
+              throw TransloaditAPIError.cantSerialize
+          }
+          
+          var body: [String: String] = ["params": paramsJSONString, "tus_num_expected_upload_files": String(expectedNumberOfFiles)]
+          if !credentials.secret.isEmpty {
+              body["signature"] = "sha384:" + paramsJSONString.hmac(key: credentials.secret)
+          }
+          
+          return body
+      }
+      
+      let boundary = UUID.init().uuidString
+      
+      func makeBodyData() throws -> Data {
+          let formFields = try makeBody(includeSecret: true)
+          var body: Data = Data()
+          for field in formFields {
+              [String(format: "--%@\r\n", boundary),
+               String(format: "Content-Disposition: form-data; name=\"%@\"\r\n\r\n", field.key),
+               String(format: "%@\r\n", field.value)]
+                  .forEach { string in
+                      body.append(Data(string.utf8))
+                  }
+          }
+          let string = String(format: "--%@--\r\n", boundary)
+          body.append(Data(string.utf8))
+          return body
+      }
+      
+      func makeRequest() throws -> URLRequest {
+          let path = basePath.appendingPathComponent(Endpoint.assemblies.rawValue)
+          var request: URLRequest = URLRequest(url: path, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 30)
+          
+          let headers = ["Content-Type": String(format: "multipart/form-data; boundary=%@", boundary)]
+          
+          request.httpMethod = "POST"
+          request.allHTTPHeaderFields = headers
+          request.httpBody = try makeBodyData()
+          return request
+      }
+      
+      let request = try makeRequest()
+      
+
+      return request
     }
     
     private func makeAssemblyRequest(

@@ -135,6 +135,23 @@ public final class Transloadit {
         }
     }
     
+    public func createAssembly(
+      templateId: String,
+      steps: [Step],
+      expectedNumberOfFiles: Int = 1,
+      customFields: [String: String] = [:],
+      completion: @escaping (Result<Assembly, TransloaditError>) -> Void
+    ) {
+        api.createAssembly(
+          templateId: templateId,
+          steps: steps,
+          expectedNumberOfFiles: expectedNumberOfFiles,
+          customFields: customFields) { result in
+            let transloaditResult = result.mapError({ error in TransloaditError.couldNotCreateAssembly(underlyingError: error) })
+            completion(transloaditResult)
+          }
+    }
+    
     /// Create an assembly, do not upload a file.
     ///
     /// This is useful for when you want to import a file from a different source, such as a third party storage service.
