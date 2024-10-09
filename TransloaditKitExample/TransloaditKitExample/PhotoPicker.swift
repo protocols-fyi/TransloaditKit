@@ -9,6 +9,8 @@ import SwiftUI
 import UIKit
 import PhotosUI
 import TUSKit
+import AVFoundation
+import MobileCoreServices
 
 struct PhotoPicker: UIViewControllerRepresentable {
 
@@ -56,7 +58,8 @@ struct PhotoPicker: UIViewControllerRepresentable {
             
             var expectedCount = pickerResults.count // Can't rely on count in enumerateObjects in Xcode 13
             fetchResult.enumerateObjects { asset, count, _ in
-                asset.getURL { url in
+                asset.getURLAndMIME { url, mime in
+                    print("url: \(url), mime: \(mime)")
                     expectedCount -= 1
                     guard let url = url else {
                         print("No url found for asset")
@@ -81,26 +84,37 @@ struct PhotoPicker: UIViewControllerRepresentable {
 
 private extension PHAsset {
     // From https://stackoverflow.com/questions/38183613/how-to-get-url-for-a-phasset
-    func getURL(completionHandler : @escaping ((_ responseURL : URL?) -> Void)){
+    func getURLAndMIME(completionHandler : @escaping ((_ responseURL : URL?, _ mime: String?) -> Void)){
         if self.mediaType == .image {
             let options: PHContentEditingInputRequestOptions = PHContentEditingInputRequestOptions()
             options.canHandleAdjustmentData = {(adjustmeta: PHAdjustmentData) -> Bool in
                 return true
             }
             self.requestContentEditingInput(with: options, completionHandler: {(contentEditingInput: PHContentEditingInput?, info: [AnyHashable : Any]) -> Void in
-                completionHandler(contentEditingInput!.fullSizeImageURL as URL?)
+                let uti: UTType?
+                if let i = contentEditingInput?.uniformTypeIdentifier {
+                    uti = UTType(i)
+                } else {
+                    uti = nil
+                }
+                completionHandler(contentEditingInput!.fullSizeImageURL as URL?, uti?.preferredMIMEType)
             })
         } else if self.mediaType == .video {
             let options: PHVideoRequestOptions = PHVideoRequestOptions()
             options.version = .original
-            PHImageManager.default().requestAVAsset(forVideo: self, options: options, resultHandler: {(asset: AVAsset?, audioMix: AVAudioMix?, info: [AnyHashable : Any]?) -> Void in
+            PHImageManager.default().requestAVAsset(forVideo: self, options: options, resultHandler: { asset, audioMix, info in
                 if let urlAsset = asset as? AVURLAsset {
                     let localVideoUrl: URL = urlAsset.url as URL
-                    completionHandler(localVideoUrl)
+                    let pathExtension = localVideoUrl.pathExtension
+                    let uti = UTType(filenameExtension: pathExtension)
+                    completionHandler(localVideoUrl, uti?.preferredMIMEType)
                 } else {
-                    completionHandler(nil)
+                    completionHandler(nil, nil)
                 }
+
             })
+//            PHImageManager.default().requestAVAsset(forVideo: self, options: options, resultHandler: {(asset: AVAsset?, audioMix: AVAudioMix?, info: [AnyHashable : Any]?) -> Void in
+//                            })
         }
     }
 }
