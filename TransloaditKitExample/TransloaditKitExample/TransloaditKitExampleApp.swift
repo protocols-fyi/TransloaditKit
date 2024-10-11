@@ -45,8 +45,18 @@ final class MyUploader: ObservableObject {
 //            }
 //        }
         for file in urls {
-            upload(url: file.path, mime: file.mime, fileExtension: file.fileExtension)
+//            upload(url: file.path, mime: file.mime, fileExtension: file.fileExtension)
+            Task {
+                try await upload(url: file.path, mime: file.mime, fileExtension: file.fileExtension)
+            }
         }
+    }
+    
+    private func upload(url: URL, mime: String, fileExtension: String) async throws {
+        let objectName = "bc15a1d6-4b2d-402d-bc3b-bc8bd67a2733/media/\(UUID().uuidString).\(fileExtension)"
+        print("objectName: \(objectName)")
+        let supabaseStep = StepFactory.makeExportToSupabaseStep(token: "Bearer eyJhbGciOiJIUzI1NiIsImtpZCI6Ikd4cFZmS1NOeFlnL3RueTQiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJodHRwczovL3R5cWJqdmNyY29qc3Rhbm1zaWxiLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiJiYzE1YTFkNi00YjJkLTQwMmQtYmMzYi1iYzhiZDY3YTI3MzMiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzI4NjM0ODUzLCJpYXQiOjE3Mjg2MzEyNTMsImVtYWlsIjoiaXdhbmdrYWltaW5AZ21haWwuY29tIiwicGhvbmUiOiIiLCJhcHBfbWV0YWRhdGEiOnsicHJvdmlkZXIiOiJnb29nbGUiLCJwcm92aWRlcnMiOlsiZ29vZ2xlIl19LCJ1c2VyX21ldGFkYXRhIjp7ImF2YXRhcl91cmwiOiJodHRwczovL2xoMy5nb29nbGV1c2VyY29udGVudC5jb20vYS9BQ2c4b2NJVUVqS2kxTk5HVXV5NUtXWlRYNGdiTFl5VXhMZkFfb1NNZk5aZGRpcUFGRmlTdFE9czk2LWMiLCJlbWFpbCI6Iml3YW5na2FpbWluQGdtYWlsLmNvbSIsImVtYWlsX3ZlcmlmaWVkIjp0cnVlLCJmdWxsX25hbWUiOiJCZW5qYW1pbiBXb25nIiwiaGFuZGxlIjoiYmVuamFtaW4iLCJpc3MiOiJodHRwczovL2FjY291bnRzLmdvb2dsZS5jb20iLCJuYW1lIjoiQmVuamFtaW4gV29uZyIsInBob25lX3ZlcmlmaWVkIjpmYWxzZSwicGljdHVyZSI6Imh0dHBzOi8vbGgzLmdvb2dsZXVzZXJjb250ZW50LmNvbS9hL0FDZzhvY0lVRWpLaTFOTkdVdXk1S1daVFg0Z2JMWXlVeExmQV9vU01mTlpkZGlxQUZGaVN0UT1zOTYtYyIsInByb3ZpZGVyX2lkIjoiMTE3NDE4NDQ2MDg4NTQ3ODc5NjgxIiwic3ViIjoiMTE3NDE4NDQ2MDg4NTQ3ODc5NjgxIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3Mjg2MjY0MzR9XSwic2Vzc2lvbl9pZCI6IjAwZGZjOTI4LTM4ZDUtNDc2Mi1hNzkwLWM4ZGIxOWY0YzEyYSIsImlzX2Fub255bW91cyI6ZmFsc2V9.fU6dAVJ41RqNsifHK_o37aQ6ZgKSI9LOqlgGw13cLV4", bucketName: "public-user-assets", objectName: objectName, contentType: mime)
+        try await transloadit.async.createAssembly(templateId: "3b10b8f60524435d8804a32508c71987", steps: [supabaseStep], andUpload: url)
     }
     
     private func upload(url: URL, mime: String, fileExtension: String) {
