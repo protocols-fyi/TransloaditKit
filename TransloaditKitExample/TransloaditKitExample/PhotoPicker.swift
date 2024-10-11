@@ -12,9 +12,15 @@ import TUSKit
 import AVFoundation
 import MobileCoreServices
 
+struct FileInfo {
+    var path: URL
+    var mime: String
+    var fileExtension: String
+}
+
 struct PhotoPicker: UIViewControllerRepresentable {
 
-    var didPickPhotos: ([URL]) -> Void
+    var didPickPhotos: ([FileInfo]) -> Void
     @Environment(\.presentationMode) var presentationMode
     
     func makeUIViewController(context: Context) -> PHPickerViewController {
@@ -50,22 +56,22 @@ struct PhotoPicker: UIViewControllerRepresentable {
             parent.presentationMode.wrappedValue.dismiss()
         }
         
-        func dataFrom(pickerResults: [PHPickerResult], completed: @escaping ([URL]) -> Void) {
+        func dataFrom(pickerResults: [PHPickerResult], completed: @escaping ([FileInfo]) -> Void) {
             let identifiers = pickerResults.compactMap(\.assetIdentifier)
             
             let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: identifiers, options: nil)
-            var assetURLs = [URL]()
+            var assetURLs = [FileInfo]()
             
             var expectedCount = pickerResults.count // Can't rely on count in enumerateObjects in Xcode 13
             fetchResult.enumerateObjects { asset, count, _ in
-                asset.getURLAndMIME { url, mime in
-                    print("url: \(url), mime: \(mime)")
+                asset.getURLAndMIME { fileInfo in
                     expectedCount -= 1
-                    guard let url = url else {
+                    guard let fileInfo = fileInfo else {
                         print("No url found for asset")
                         return
                     }
-                    assetURLs.append(url)
+                    print(fileInfo)
+                    assetURLs.append(fileInfo)
 
                     if expectedCount == 0 {
                         completed(assetURLs)
@@ -84,7 +90,7 @@ struct PhotoPicker: UIViewControllerRepresentable {
 
 private extension PHAsset {
     // From https://stackoverflow.com/questions/38183613/how-to-get-url-for-a-phasset
-    func getURLAndMIME(completionHandler : @escaping ((_ responseURL : URL?, _ mime: String?) -> Void)){
+    func getURLAndMIME(completionHandler : @escaping ((FileInfo?) -> Void)){
         if self.mediaType == .image {
             let options: PHContentEditingInputRequestOptions = PHContentEditingInputRequestOptions()
             options.canHandleAdjustmentData = {(adjustmeta: PHAdjustmentData) -> Bool in
@@ -97,7 +103,11 @@ private extension PHAsset {
                 } else {
                     uti = nil
                 }
-                completionHandler(contentEditingInput!.fullSizeImageURL as URL?, uti?.preferredMIMEType)
+                guard let url = contentEditingInput?.fullSizeImageURL, let mime = uti?.preferredMIMEType, let fileExtension = uti?.preferredFilenameExtension else {
+                    completionHandler(nil)
+                    return
+                }
+                completionHandler(.init(path: url, mime: mime, fileExtension: fileExtension))
             })
         } else if self.mediaType == .video {
             let options: PHVideoRequestOptions = PHVideoRequestOptions()
@@ -107,14 +117,16 @@ private extension PHAsset {
                     let localVideoUrl: URL = urlAsset.url as URL
                     let pathExtension = localVideoUrl.pathExtension
                     let uti = UTType(filenameExtension: pathExtension)
-                    completionHandler(localVideoUrl, uti?.preferredMIMEType)
+                    guard let mime = uti?.preferredMIMEType, let fileExtension = uti?.preferredFilenameExtension else {
+                        completionHandler(nil)
+                        return
+                    }
+                    completionHandler(.init(path: localVideoUrl, mime: mime, fileExtension: fileExtension))
                 } else {
-                    completionHandler(nil, nil)
+                    completionHandler(nil)
                 }
 
             })
-//            PHImageManager.default().requestAVAsset(forVideo: self, options: options, resultHandler: {(asset: AVAsset?, audioMix: AVAudioMix?, info: [AnyHashable : Any]?) -> Void in
-//                            })
         }
     }
 }

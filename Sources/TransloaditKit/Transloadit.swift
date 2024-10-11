@@ -92,8 +92,8 @@ public final class Transloadit {
             guard let context = context,
                   let assemblyStr = context["assembly"],
                   let assembly = Assembly(fromString: assemblyStr) else {
-                      return nil
-                  }
+                return nil
+            }
             return assembly
         }
         
@@ -117,20 +117,55 @@ public final class Transloadit {
     }
     
     public func createAssembly(
-      templateId: String,
-      steps: [Step],
-      expectedNumberOfFiles: Int = 1,
-      customFields: [String: String] = [:],
-      completion: @escaping (Result<Assembly, TransloaditError>) -> Void
-    ) {
+        templateId: String,
+        steps: [Step],
+        andUpload files: [URL],
+        customFields: [String: String] = [:],
+        completion: @escaping (Result<Assembly, TransloaditError>) -> Void
+    ) -> TransloaditPoller {
+        func makeMetadata(assembly: Assembly) -> [String: String] {
+            [:]
+        }
+        
+        let poller = TransloaditPoller(transloadit: self, didFinish: { [weak self] in
+            guard let self = self else { return }
+            self.pollers[files] = nil
+        })
+        
+        if let existingPoller = self.pollers[files], existingPoller === poller {
+            assertionFailure("Transloadit: Somehow already got a poller for this url and these files")
+        }
+        
         api.createAssembly(
-          templateId: templateId,
-          steps: steps,
-          expectedNumberOfFiles: expectedNumberOfFiles,
-          customFields: customFields) { result in
-            let transloaditResult = result.mapError({ error in TransloaditError.couldNotCreateAssembly(underlyingError: error) })
-            completion(transloaditResult)
-          }
+            templateId: templateId,
+            steps: steps,
+            expectedNumberOfFiles: files.count,
+            customFields: customFields) { [weak self] result in
+                guard let self = self else {
+                    return
+                }
+                
+                do {
+                    let assembly = try result.get()
+                    try self.tusClient.uploadFiles(
+                        filePaths: files,
+                        uploadURL: assembly.tusURL,
+                        customHeaders: makeMetadata(assembly: assembly),
+                        context: ["assembly": assembly.description, "fieldname": "file-input", "assembly_url": assembly.url.absoluteString]
+                    )
+                    
+                    poller.assemblyURL = assembly.url
+                    
+                    completion(.success(assembly))
+                } catch let error where error is TransloaditAPIError {
+                    completion(.failure(TransloaditError.couldNotCreateAssembly(underlyingError: error)))
+                } catch {
+                    completion(.failure(TransloaditError.couldNotUploadFile(underlyingError: error)))
+                }
+            }
+        
+        pollers[files] = poller
+        return poller
     }
     
     /// Create an assembly, do not upload a file.
@@ -144,21 +179,21 @@ public final class Transloadit {
     /// - Parameter customFields: JSON-encodable dictionary of custom parameters to pass to the assembly creation
     /// - Parameter completion: The created assembly
     public func createAssembly(
-      steps: [Step],
-      expectedNumberOfFiles: Int = 1,
-      customFields: [String: String] = [:],
-      completion: @escaping (Result<Assembly, TransloaditError>) -> Void
+        steps: [Step],
+        expectedNumberOfFiles: Int = 1,
+        customFields: [String: String] = [:],
+        completion: @escaping (Result<Assembly, TransloaditError>) -> Void
     ) {
         api.createAssembly(
-          steps: steps,
-          expectedNumberOfFiles: expectedNumberOfFiles,
-          customFields: customFields) { result in
-            let transloaditResult = result.mapError { error in TransloaditError.couldNotCreateAssembly(underlyingError: error) }
-            completion(transloaditResult)
-        }
+            steps: steps,
+            expectedNumberOfFiles: expectedNumberOfFiles,
+            customFields: customFields) { result in
+                let transloaditResult = result.mapError { error in TransloaditError.couldNotCreateAssembly(underlyingError: error) }
+                completion(transloaditResult)
+            }
     }
     
-  
+    
     /// Create an assembly, do not upload a file.
     ///
     /// This is useful for when you want to import a file from a different source, such as a third party storage service.
@@ -171,15 +206,15 @@ public final class Transloadit {
     ///   - customFields: JSON-encodable dictionary of custom parameters to pass to the assembly creation
     ///   - completion: The created Assembly
     public func createAssembly(
-      templateId: String,
-      expectedNumberOfFiles: Int = 1,
-      customFields: [String: String] = [:],
-      completion: @escaping (Result<Assembly, TransloaditError>) -> Void
+        templateId: String,
+        expectedNumberOfFiles: Int = 1,
+        customFields: [String: String] = [:],
+        completion: @escaping (Result<Assembly, TransloaditError>) -> Void
     ) {
         api.createAssembly(
-          templateId: templateId,
-          expectedNumberOfFiles: expectedNumberOfFiles,
-          customFields: customFields
+            templateId: templateId,
+            expectedNumberOfFiles: expectedNumberOfFiles,
+            customFields: customFields
         ) { result in
             let transloaditResult = result.mapError { error in TransloaditError.couldNotCreateAssembly(underlyingError: error) }
             completion(transloaditResult)
@@ -188,10 +223,10 @@ public final class Transloadit {
     
     @discardableResult
     public func createAssembly(
-      templateId: String,
-      andUpload files: [URL],
-      customFields: [String: String] = [:],
-      completion: @escaping (Result<Assembly, TransloaditError>) -> Void
+        templateId: String,
+        andUpload files: [URL],
+        customFields: [String: String] = [:],
+        completion: @escaping (Result<Assembly, TransloaditError>) -> Void
     )  -> TransloaditPoller {
         func makeMetadata(assembly: Assembly) -> [String: String] {
             [:]
@@ -207,30 +242,30 @@ public final class Transloadit {
         }
         
         createAssembly(
-          templateId: templateId,
-          expectedNumberOfFiles: files.count,
-          customFields: customFields,
-          completion: { [weak self] result in
-            guard let self = self else { return }
-            
-            do {
-                let assembly = try result.get()
-                try self.tusClient.uploadFiles(
-                    filePaths: files,
-                    uploadURL: assembly.tusURL,
-                    customHeaders: makeMetadata(assembly: assembly),
-                    context: ["assembly": assembly.description, "fieldname": "file-input", "assembly_url": assembly.url.absoluteString]
-                )
+            templateId: templateId,
+            expectedNumberOfFiles: files.count,
+            customFields: customFields,
+            completion: { [weak self] result in
+                guard let self = self else { return }
                 
-                poller.assemblyURL = assembly.url
-                
-                completion(.success(assembly))
-            } catch let error where error is TransloaditAPIError {
-                completion(.failure(TransloaditError.couldNotCreateAssembly(underlyingError: error)))
-            } catch {
-                completion(.failure(TransloaditError.couldNotUploadFile(underlyingError: error)))
-            }
-        })
+                do {
+                    let assembly = try result.get()
+                    try self.tusClient.uploadFiles(
+                        filePaths: files,
+                        uploadURL: assembly.tusURL,
+                        customHeaders: makeMetadata(assembly: assembly),
+                        context: ["assembly": assembly.description, "fieldname": "file-input", "assembly_url": assembly.url.absoluteString]
+                    )
+                    
+                    poller.assemblyURL = assembly.url
+                    
+                    completion(.success(assembly))
+                } catch let error where error is TransloaditAPIError {
+                    completion(.failure(TransloaditError.couldNotCreateAssembly(underlyingError: error)))
+                } catch {
+                    completion(.failure(TransloaditError.couldNotUploadFile(underlyingError: error)))
+                }
+            })
         
         pollers[files] = poller
         return poller
@@ -260,10 +295,10 @@ public final class Transloadit {
     ///```
     @discardableResult
     public func createAssembly(
-      steps: [Step],
-      andUpload files: [URL],
-      customFields: [String: String] = [:],
-      completion: @escaping (Result<Assembly, TransloaditError>) -> Void
+        steps: [Step],
+        andUpload files: [URL],
+        customFields: [String: String] = [:],
+        completion: @escaping (Result<Assembly, TransloaditError>) -> Void
     )  -> TransloaditPoller {
         func makeMetadata(assembly: Assembly) -> [String: String] {
             [:]
@@ -308,35 +343,35 @@ public final class Transloadit {
         return poller
     }
     
- #if compiler(>=5.5) && canImport(_Concurrency)
-
+#if compiler(>=5.5) && canImport(_Concurrency)
+    
     @available(macOS 10.15, iOS 13, *)
     public func createAssembly(
-      steps: [Step],
-      expectedNumberOfFiles: Int = 1,
-      customFields: [String: String] = [:]
+        steps: [Step],
+        expectedNumberOfFiles: Int = 1,
+        customFields: [String: String] = [:]
     ) async throws -> Assembly {
         return try await withCheckedThrowingContinuation { continuation in
             createAssembly(
-              steps: steps,
-              expectedNumberOfFiles: expectedNumberOfFiles,
-              customFields: customFields,
-              completion: { result in
-                switch result {
-                case .success(let assembly):
-                    continuation.resume(returning: assembly)
-                case .failure(let transloaditError):
-                    continuation.resume(throwing: transloaditError)
-                }
-            })
+                steps: steps,
+                expectedNumberOfFiles: expectedNumberOfFiles,
+                customFields: customFields,
+                completion: { result in
+                    switch result {
+                    case .success(let assembly):
+                        continuation.resume(returning: assembly)
+                    case .failure(let transloaditError):
+                        continuation.resume(throwing: transloaditError)
+                    }
+                })
         }
     }
     
     @available(macOS 10.15, iOS 13, *)
     public func createAssembly(
-      steps: [Step],
-      andUpload files: [URL],
-      customFields: [String: String] = [:]
+        steps: [Step],
+        andUpload files: [URL],
+        customFields: [String: String] = [:]
     ) async throws -> (Assembly, TransloaditPoller) {
         
         return try await withCheckedThrowingContinuation({ continuation in
@@ -346,7 +381,7 @@ public final class Transloadit {
                 andUpload: files,
                 customFields: customFields
             ) { result in
-
+                
                 switch result {
                 case .success(let assembly):
                     continuation.resume(returning: (assembly, poller))
@@ -394,18 +429,18 @@ extension Transloadit: TUSClientDelegate {
     public func didStartUpload(id: UUID, context: [String : String]?, client: TUSClient) {
         guard let fileDelegate = fileDelegate,
               let assembly = context.flatMap(extractAssemblyFrom) else {
-                  return
-              }
-
+            return
+        }
+        
         fileDelegate.didStartUpload(assembly: assembly, client: self)
     }
     
     public func didFinishUpload(id: UUID, url: URL, context: [String : String]?, client: TUSClient) {
         guard let fileDelegate = fileDelegate,
               let assembly = context.flatMap(extractAssemblyFrom) else {
-                  return
-              }
-
+            return
+        }
+        
         fileDelegate.didFinishUpload(assembly: assembly, client: self)
     }
     
@@ -417,8 +452,8 @@ extension Transloadit: TUSClientDelegate {
         
         guard let fileDelegate = fileDelegate,
               let assembly = context.flatMap(extractAssemblyFrom) else {
-                  return
-              }
+            return
+        }
         
         // @Improvement: TUSKit handles multi-uploads for a file. But an Assembly also supports multiple files.
         // An improvement would be to track multiple files and pass that.
@@ -441,7 +476,7 @@ extension Transloadit: TUSClientDelegate {
 private func extractAssemblyFrom(context: [String: String]) -> Assembly? {
     guard let assemblyStr = context["assembly"],
           let assembly = Assembly(fromString: assemblyStr) else {
-              return nil
+        return nil
     }
     
     return assembly
