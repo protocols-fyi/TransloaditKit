@@ -148,10 +148,10 @@ public final class Transloadit {
         
         let poller = TransloaditPoller(transloadit: self, didFinish: { [weak self] in
             guard let self = self else { return }
-            self.pollers[files] = nil
+            self.pollers.remove(for: files)
         })
         
-        if let existingPoller = self.pollers[files], existingPoller === poller {
+        if let existingPoller = self.pollers.get(for: files), existingPoller === poller {
             assertionFailure("Transloadit: Somehow already got a poller for this url and these files")
         }
         
@@ -183,7 +183,7 @@ public final class Transloadit {
                 }
             }
         
-        pollers[files] = poller
+        pollers.register(poller, for: files)
         return poller
     }
     
